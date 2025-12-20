@@ -1,0 +1,21 @@
+# Build artifacts
+*.obj
+*.pdb
+*.idb
+*.ilk
+*.exe
+*.exp
+*.lib
+*.aps
+*.ncb
+*.opt
+*.plg
+*.clw
+Debug/
+Release/
+
+# VC6 workspace/user files
+*.dsw
+*.dsp
+*.suo
+*.user
