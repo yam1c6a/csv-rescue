@@ -16,6 +16,54 @@ static char* dup_range(const char* s, int len) {
     return p;
 }
 
+// v0.2 ============================================================
+
+// 左に padChar で width まで埋める
+std::string PadLeft(
+    const std::string& src,
+    size_t width,
+    char padChar
+){
+    if (src.length() >= width)
+        return src;
+
+    return std::string(width - src.length(), padChar) + src;
+}
+
+// 右に padChar で width まで埋める
+std::string PadRight(
+    const std::string& src,
+    size_t width,
+    char padChar
+){
+    if (src.length() >= width)
+        return src;
+
+    return src + std::string(width - src.length(), padChar);
+}
+
+// 数字以外をすべて除去する（" 01-23 " → "0123"）
+std::string NormalizeNumber(const std::string& src)
+{
+    std::string out;
+    for (size_t i = 0; i < src.length(); i++) {
+        if (src[i] >= '0' && src[i] <= '9') {
+			out += src[i];
+        }
+    }
+    return out;
+}
+
+// 数値 + 左0埋め
+std::string NormalizeNumberPad(
+    const std::string& src,
+    size_t width
+){
+    std::string n = NormalizeNumber(src);
+    return PadLeft(n, width, '0');
+}
+
+
 CsvRescue::CsvRescue()
 : m_rows(0), m_rowCount(0), m_rowCap(0), m_maxCols(0) {}
 
@@ -35,6 +83,37 @@ void CsvRescue::Clear() {
     m_rowCount = 0;
     m_rowCap = 0;
     m_maxCols = 0;
+}
+
+bool CsvRescue::LoadFromFile(const char* path) {
+    Clear();
+    if (!path) return false;
+
+    FILE* fp = fopen(path, "rb");
+    if (!fp) return false;
+
+    // サイズ取得
+    fseek(fp, 0, SEEK_END);
+    long sz = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (sz < 0) { fclose(fp); return false; }
+
+    // 読み込み（空ファイルも許容するが、0.1では false 扱いにする）
+    char* buf = (char*)malloc((size_t)sz);
+    if (!buf) { fclose(fp); return false; }
+
+    size_t rd = fread(buf, 1, (size_t)sz, fp);
+    fclose(fp);
+
+    bool ok = LoadFromMemory(buf, (int)rd);
+    free(buf);
+    return ok;
+}
+
+bool CsvRescue::LoadFromMemory(const char* data, int size) {
+    Clear();
+    if (!data || size <= 0) return false;
+    return ParseCsv(data, size);
 }
 
 // 行の解放
@@ -103,37 +182,6 @@ const char* CsvRescue::Get(int row, int col) const {
     const Row* r = &m_rows[row];
     if (col >= r->count) return kEmpty;
     return r->cells[col] ? r->cells[col] : kEmpty;
-}
-
-bool CsvRescue::LoadFromFile(const char* path) {
-    Clear();
-    if (!path) return false;
-
-    FILE* fp = fopen(path, "rb");
-    if (!fp) return false;
-
-    // サイズ取得
-    fseek(fp, 0, SEEK_END);
-    long sz = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    if (sz < 0) { fclose(fp); return false; }
-
-    // 読み込み（空ファイルも許容するが、0.1では false 扱いにする）
-    char* buf = (char*)malloc((size_t)sz);
-    if (!buf) { fclose(fp); return false; }
-
-    size_t rd = fread(buf, 1, (size_t)sz, fp);
-    fclose(fp);
-
-    bool ok = LoadFromMemory(buf, (int)rd);
-    free(buf);
-    return ok;
-}
-
-bool CsvRescue::LoadFromMemory(const char* data, int size) {
-    Clear();
-    if (!data || size <= 0) return false;
-    return ParseCsv(data, size);
 }
 
 // --- CSV parsing ---
@@ -311,6 +359,106 @@ oom:
     #undef ROW_PUSH_CELL
 
     return false;
+}
+
+// v0.2 ============================================================
+
+void CsvRescue::ClearIndex()
+{
+    m_index.clear();
+}
+
+void CsvRescue::AddKey(int row, const std::string& key)
+{
+    KeyIndexItem item;
+    item.key = key;
+    item.row = row;
+    m_index.push_back(item);
+}
+
+bool CsvRescue::KeyIndexLess(
+    const KeyIndexItem& a,
+    const KeyIndexItem& b
+)
+{
+    return a.key < b.key;
+}
+
+void CsvRescue::Sort()
+{
+    std::sort(m_index.begin(), m_index.end(), KeyIndexLess);
+}
+
+int CsvRescue::Find(const std::string& key) const
+{
+    int left = 0;
+    int right = (int)m_index.size(); // [left, right)
+
+    while (left < right) {
+        int mid = left + (right - left) / 2;
+
+        if (m_index[mid].key < key) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+
+    if (left < (int)m_index.size() && m_index[left].key == key) {
+        return m_index[left].row;
+    }
+    return -1;
+}
+
+void CsvRescue::FindRange(const std::string& key, int& begin, int& end) const
+{
+    int sz = (int)m_index.size();
+    begin = 0;
+    end = 0;
+    if (sz == 0) return;
+
+    // lower_bound: 最初に key 以上になる位置
+    int left = 0;
+    int right = sz;
+    while (left < right) {
+        int mid = left + (right - left) / 2;
+        if (m_index[mid].key < key) left = mid + 1;
+        else right = mid;
+    }
+    int lb = left;
+
+    if (lb >= sz || m_index[lb].key != key) {
+        // 無い
+        begin = lb;
+        end = lb;
+        return;
+    }
+
+    // upper_bound: 最初に key より大きくなる位置
+    left = lb;
+    right = sz;
+    while (left < right) {
+        int mid = left + (right - left) / 2;
+        if (key < m_index[mid].key) right = mid;
+        else left = mid + 1;
+    }
+    int ub = left;
+
+    begin = lb;
+    end = ub;
+}
+
+int CsvRescue::FindRows(const std::string& key, std::vector<int>& outRows) const
+{
+    outRows.clear();
+
+    int b, e;
+    FindRange(key, b, e);
+
+    for (int i = b; i < e; i++) {
+        outRows.push_back(m_index[i].row);
+    }
+    return (int)outRows.size();
 }
 
 } // namespace csvr

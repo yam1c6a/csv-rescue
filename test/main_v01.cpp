@@ -17,7 +17,7 @@ static void print_escaped(const char* s) {
 }
 
 int main(int argc, char** argv) {
-    const char* path = "test.csv";
+    const char* path = "test_broken.csv";
     if (argc >= 2) path = argv[1];
 
     csvr::CsvRescue csv;

@@ -17,24 +17,87 @@ RFC4180準拠や厳密な検証よりも、日本の業務現場で遭遇するCSVデータの救出を優先しま
 
 ※ 書き出し（Save）機能はありません
 
-## 使い方（最小）
+## csv-rescue 0.2 で追加された機能
+
+0.1 の「壊れていても最後まで読む」方針はそのままに、  
+**読み込んだ CSV を高速に検索するための仕組み**を追加しました。
+
+### インデックス検索（KEY指定）
+
+- 任意の文字列 KEY を使って行を検索可能
+- CSV 本体は並び替えず、別インデックスを構築
+- ソート＋二分探索により高速検索
+- 同一 KEY が複数行に存在するケースに対応
+
+### 特徴
+
+- VC++6.0 でコンパイル可能
+- `std::unordered_map` などの新しすぎる STL は未使用
+- KEY の作り方は利用側で自由に定義
+- 業務 CSV に多い「重複コード」「履歴行」に対応
+
+## インデックス検索の使い方（v0.2）
+
+### 1. CSVを読み込む
 
 ```cpp
-#include "csv_rescue.h"
-
 csvr::CsvRescue csv;
-if (csv.LoadFromFile("test.csv")) {
-    int rows = csv.GetRowCount();
-    int cols = csv.GetColumnCount(); // 観測上の最大列数
-    const char* v = csv.Get(0, 0);   // 範囲外は "" を返す
+csv.LoadFromFile("test.csv");
+```
+
+### 2. インデックスを構築する
+
+```cpp
+csv.ClearIndex();
+
+for (int i = 0; i < csv.GetRowCount(); i++) {
+    std::string key =
+        csvr::NormalizeNumberPad(csv.Get(i, 1), 6) +
+        csvr::PadLeft(csv.Get(i, 2), 8, '0');
+
+    csv.AddKey(i, key);
+}
+
+csv.Sort();
+```
+
+### 3. 1件検索
+
+```cpp
+int row = csv.Find(findKey);
+if (row >= 0) {
+    const char* v = csv.Get(row, 0);
+}
+```
+
+### 4. 複数行検索
+
+```cpp
+std::vector<int> rows;
+int count = csv.FindRows(findKey, rows);
+
+for (int i = 0; i < count; i++) {
+    int row = rows[i];
+    const char* v = csv.Get(row, 0);
 }
 ```
 
 ## ファイル構成
 
-- `src/csv_rescue.h` / `src/csv_rescue.cpp` : ライブラリ本体
-- `test/main.cpp` : 最小ドライバ（テスト兼）
-- `test/test.csv` : 例（列ズレ・クオート内改行など）
+- `src/csv_rescue.h` / `src/csv_rescue.cpp`  
+  ライブラリ本体
+
+- `test/main.cpp`  
+  読み取り確認用（v0.1相当・壊れたCSVの挙動確認）
+
+- `test/main_v02_index.cpp`  
+  インデックス検索確認用（v0.2）
+
+- `test/test.csv`  
+  読み取りテスト用CSV（列ズレ・クオート内改行など）
+
+- `test/test_index.csv`  
+  インデックス検索テスト用CSV（同一KEY複数行）
 
 ## ライセンス
 
